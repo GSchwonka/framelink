@@ -1,0 +1,182 @@
+# framelink design notes
+
+This document explains why framelink is built the way it is. The wire format itself is defined in [SPEC.md](SPEC.md). Here the goal is to justify each choice, name the alternatives that were rejected, and be explicit about what the protocol does not protect against.
+
+## Background
+
+> **Author's note:** replace this block with the production story. It should say what the device and link were, what the symptom looked like in the field, which of the failure classes below caused it, and how it was found and fixed. Two or three paragraphs are enough. This is the part a reader remembers.
+
+Hand-rolled serial protocols tend to fail in the same four ways:
+
+1. **Desync.** The decoder trusts a corrupted length byte and consumes the next frame as payload.
+2. **Collateral drops.** After a CRC failure the decoder throws away its whole buffer, including the start of a valid frame.
+3. **Silent loss.** There is no acknowledgement, so nobody knows a frame was lost.
+4. **Overrun.** There is no flow control, so a fast sender fills the receiver's buffers and frames vanish under load.
+
+framelink addresses each of these with one mechanism, and each mechanism has a test that fails without it.
+
+| Failure | Mechanism | Proving test |
+|---------|-----------|--------------|
+| Desync | Header CRC-8 | Corrupt LEN, then check the next frame is delivered promptly |
+| Collateral drops | Rescan from offset 1 | Truncated frame followed by a valid frame |
+| Silent loss | Sequence numbers, ACK/NAK, retransmit | Lossy loopback delivers all frames in order |
+| Overrun | Credit-based flow control | Slow consumer shows zero `overflows` |
+
+## Design constraints
+
+- **C99, two files, no dependencies.** Integrating the library means copying two files.
+- **Zero dynamic allocation.** All memory comes from the caller. Worst-case RAM use is known at compile time.
+- **Runs on an 8 KB-RAM part.** Estimated footprint for a 4-frame window and a 4-frame receive queue at the maximum 255-byte payload:
+
+  | Item | Bytes |
+  |------|-------|
+  | Transmit buffer, 4 x 262 | 1048 |
+  | Receive queue, 4 x 257 | 1028 |
+  | Decoder frame buffer | 262 |
+  | Context and counters | about 100 |
+  | **Total** | **about 2.4 KB** |
+
+  The final figure will be measured with `arm-none-eabi-size` and recorded in [MEASUREMENTS.md](MEASUREMENTS.md). A build with a smaller `FL_MAX_PAYLOAD` shrinks every row except the context.
+
+- **No threads, no timers, no clock.** The caller passes `now_ms` into `fl_poll`. All time comparisons use unsigned subtraction, so the 49.7-day wraparound of a 32-bit millisecond counter is harmless.
+- **Transport-agnostic.** The library sees only `read_bytes` and `write_bytes`. UART, TCP and BLE differ only in the port code.
+
+## Framing without byte stuffing
+
+HDLC-style stuffing and COBS both make the SYNC byte unambiguous, so a decoder can never mistake payload for a frame start. framelink uses neither, and accepts that `0x7E` may appear inside a frame.
+
+**Why:**
+
+- Stuffing makes frame size data-dependent. HDLC can double a frame in the worst case, which doubles the worst-case buffer on a RAM-constrained part.
+- COBS has small, bounded overhead, but it needs the whole frame before encoding and is harder to decode incrementally.
+- With a header CRC, a false SYNC inside the payload is rejected after 4 more bytes with probability 255/256. The remaining 1/256 case is caught by CRC16 and handled by rescan.
+
+**Cost:** a rescan can re-feed up to 261 buffered bytes. In the worst case the decoder does more than one pass over some bytes. The fuzzer includes a throughput check so this cannot become a denial-of-service hole, and [MEASUREMENTS.md](MEASUREMENTS.md) reports the worst-case cycles per byte alongside the normal case.
+
+COBS is a defensible alternative. The trade-off is recorded here so a reader can disagree on informed grounds.
+
+## Why a separate header CRC
+
+Without a header check, a corrupted LEN is only discovered when CRC16 fails, which is after LEN bytes have arrived. If LEN was corrupted to 250, the decoder swallows the next several valid frames as payload before it finds out. Rescan would eventually find them, but only after those 250 bytes arrived, which adds latency and forces retransmits.
+
+The CRC-8 costs one byte per frame and catches the corrupted header after 5 bytes. It also makes NAK possible. If HCRC passed but CRC16 failed, the SEQ field can be trusted, so the receiver can ask for a retransmission immediately instead of waiting for a timeout.
+
+**Detection properties** of the CRC-8 polynomial `0x07` over the 24-bit header:
+
+- The polynomial is divisible by `x + 1`, so every error with an odd number of flipped bits is detected.
+- Every burst of 8 bits or fewer is detected.
+- Every 2-bit and 3-bit error is detected. There are only 2,300 such patterns in 24 bits, so `tests/` checks all of them exhaustively instead of relying on published tables.
+
+## Why CRC16-CCITT instead of a checksum
+
+A simple additive checksum is the most common choice in hand-rolled protocols, and it is weak in exactly the way serial links fail.
+
+| Error pattern | 8-bit additive sum | 16-bit Fletcher | CRC16-CCITT |
+|---------------|--------------------|-----------------|-------------|
+| Any single-bit error | detected | detected | detected |
+| Two bytes swapped | **missed** | detected | detected |
+| Any 2-bit error in a max-size frame | often missed | mostly detected | detected |
+| Any odd number of bit errors | not guaranteed | not guaranteed | detected |
+| Any burst of 16 bits or fewer | not guaranteed | not guaranteed | detected |
+| Random corruption, undetected rate | about 1 in 256 | about 1 in 65,000 | about 1 in 65,536 |
+
+The polynomial `0x1021` includes the factor `x + 1` and gives a Hamming distance of 4 for messages up to 32,751 bits. The largest framelink frame is 2,096 bits, so every 1, 2 and 3-bit error in any frame is detected.
+
+A table-driven implementation costs 512 bytes of flash. The bitwise version costs a few dozen bytes and roughly 8 times more cycles per byte. The default is bitwise, and `FL_CRC_TABLE` selects the table. Both costs are measured.
+
+A 32-bit CRC would lower the undetected rate further, at 2 more bytes per frame. For the error rates of a real UART this is not worth it. For a very noisy link, see [failure modes](#failure-modes-framelink-does-not-protect-against).
+
+## Why credit-based flow control instead of XON/XOFF
+
+The scarce resource on a small receiver is not bytes per second. It is free slots in the receive queue. The flow control should talk about that resource directly.
+
+**XON/XOFF** sends a single `0x13` byte to pause the sender and `0x11` to resume it.
+
+- In a binary protocol those byte values occur in payloads, so they must be escaped. That brings back byte stuffing.
+- The control bytes are not protected by any CRC. One flipped bit can create a spurious pause or erase a real one.
+- A lost XOFF means overrun. A lost XON means deadlock, and nothing in XON/XOFF recovers from it.
+- It is reactive. By the time XOFF reaches the sender, the UART FIFO, the DMA buffer and the sender's own queue already hold data in flight. The receiver needs headroom for all of it, and the right amount depends on baud rate and latency.
+
+**Hardware RTS/CTS** fixes the reliability problems but needs extra wires. It does not exist over TCP or BLE, and USB-to-UART bridges implement it inconsistently.
+
+**Credits** work as follows:
+
+- The receiver puts its free queue slots into every ACK. The sender may have at most that many frames in flight past the last acknowledged one.
+- It is proactive. The sender knows before it transmits whether there is room, so no frame is ever sent that will be dropped.
+- Credit updates are frames, protected by both CRCs.
+- Credits ride on ACKs that are already being sent, so the cost is one byte per ACK.
+- It counts frames, which is what the receiver actually allocates.
+- It works the same over UART, TCP and BLE.
+
+**Deadlock.** If the receiver is full, the sender stops. When the application drains the queue, the receiver sends a CREDIT update, and that update can be lost. To recover, a blocked sender sends an empty CREDIT probe every `rto_ms`, which the receiver must answer. This is the same idea as the TCP persist timer. Probes do not count towards `max_retries`, because a live receiver that is full is not a dead link.
+
+**Measured proof.** The throughput tests run a deliberately slow consumer twice: once with credits, once with credits forced to unlimited. The second run shows the overflow drops and retransmission waste that credits prevent. See [MEASUREMENTS.md](MEASUREMENTS.md).
+
+## Why Go-Back-N instead of selective repeat
+
+With selective repeat, the receiver keeps out-of-order frames and only the missing one is resent. With Go-Back-N, the receiver discards out-of-order frames and the sender resends everything from the gap.
+
+framelink uses Go-Back-N because:
+
+- The receiver needs no reorder buffer and no per-slot bitmap, which saves RAM and code.
+- On a point-to-point serial link, windows are small, typically 4 to 8 frames, so the extra retransmission is cheap.
+- The "one NAK per gap" rule in the spec prevents the retransmission storms Go-Back-N is known for.
+
+The cost shows up on very lossy links, where each loss resends a whole window. The recovery measurements at high error rates quantify it. Selective repeat is a possible v2 option.
+
+## Sequence wraparound
+
+SEQ is 8 bits and wraps from 255 to 0. Comparisons use serial-number arithmetic:
+
+```c
+static inline int fl_seq_after(uint8_t a, uint8_t b) {
+    uint8_t d = (uint8_t)(a - b);
+    return d != 0 && d < 128;
+}
+```
+
+For this to be unambiguous, the sender must never have more than 127 frames unacknowledged. Otherwise a retransmitted old frame and a new frame could share a SEQ, and the receiver could not tell them apart. The window is therefore limited to `1..127`, and `fl_init` rejects larger values.
+
+Worked example with window 4:
+
+| Step | Sender `snd_una` | Frames in flight | Receiver `rcv_nxt` | Note |
+|------|------------------|------------------|--------------------|------|
+| 1 | 253 | 253 254 255 0 | 253 | Window spans the wrap |
+| 2 | 253 | 253 254 255 0 | 255 | 253 and 254 delivered |
+| 3 | 255 | 255 0 | 255 | ACK 254 arrives. Frame 255 was corrupted |
+| 4 | 255 | 255 0 | 255 | Frame 0 arrives, is "after" 255, out of order. One NAK for 255 |
+| 5 | 255 | 255 0 1 2 | 3 | Sender resends from 255. All delivered in order |
+
+8-bit sequence numbers were chosen over 16-bit because a 127-frame window is far more than a serial link needs, and every frame saves a byte. The wraparound test sends thousands of frames through the maximum window with random loss and checks strict ordering.
+
+## Link reset and delivery guarantees
+
+- Within one session, delivery is **exactly once and in order**.
+- When `max_retries` is exceeded, the link goes down and the handshake restarts with fresh sequence numbers.
+- Frames that were unacknowledged at that moment are reported to the application through `on_link_down`, not silently resent. Some of them may already have been delivered, because the data frame arrived but its ACK was lost.
+- Across a reset, delivery is therefore **at most once, with unknown status for in-flight frames**. The application decides whether to resend them. Applications that need exactly-once across resets should put an idempotency key in the payload.
+
+This limit is fundamental. Solving it needs state that survives the reset, which contradicts the goal of a small, stateless-at-boot library.
+
+## Failure modes framelink does not protect against
+
+Being honest about limits is a feature. framelink does not protect against:
+
+- **Undetected corruption.** Random corruption that beats both CRCs gets through at a rate of roughly 1 in 16 million corrupted frames. On a link that corrupts most frames, this can happen in practice. Put an end-to-end check in the payload if that matters.
+- **A malicious peer.** There is no authentication. Anyone who can write to the stream can inject frames, lie about credits or force resets.
+- **A peer that ignores credits.** framelink detects it through the `overflows` counter, but cannot prevent it.
+- **Extreme error rates.** At 10% corrupted bytes, a frame with a 64-byte payload arrives intact about 0.06% of the time. No retransmission scheme fixes that. Smaller frames help, and the measurements show by how much.
+- **Silent peer death on an idle link.** Without traffic, nothing notices. The application must send PING periodically if it needs to know.
+- **Stale data after a long stall.** A frame stuck in a transport buffer for longer than 127 frames of traffic could alias a new SEQ. This cannot happen on a UART. Over TCP, the TCP layer already prevents it.
+- **Bugs in the port code.** A UART driver that drops bytes under interrupt load shows up as corruption, which framelink recovers from, but the root cause is still a driver bug.
+
+## Non-goals
+
+These are out of scope for v1. Each would add code, RAM and attack surface to every user, including users who do not need it.
+
+- **Encryption and authentication.** Use a secure transport, or a layer above framelink.
+- **Compression.** Payloads on small links are usually already compact. Compression belongs to the application.
+- **Payloads over 255 bytes and fragmentation.** A 16-bit LEN would double the header-length cost and the worst-case buffer.
+- **Multiple channels, priorities or addressing.** Use TYPE to multiplex logical streams.
+- **Selective repeat.** Possible in v2 if measurements show Go-Back-N is a bottleneck.
+- **Dynamic allocation.** Never.
