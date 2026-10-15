@@ -1,0 +1,65 @@
+menu "framelink demo"
+
+    choice FL_APP
+        prompt "Application"
+        default FL_APP_ECHO_UART
+
+        config FL_APP_ECHO_UART
+            bool "Echo peer on the USB serial port, for the Python host"
+        config FL_APP_LOOPBACK
+            bool "UART1 to UART2 loopback on one chip (needs two wires)"
+        config FL_APP_ECHO_TCP
+            bool "Echo peer over Wi-Fi TCP"
+        config FL_APP_BENCH
+            bool "Decoder and encoder cycle counts (no wiring)"
+    endchoice
+
+    config FL_UART_BAUD
+        int "Baud rate of the USB serial echo peer"
+        default 921600
+
+    config FL_WINDOW
+        int "Send window (frames in flight)"
+        range 1 64
+        default 8
+
+    config FL_SLOTS
+        int "Receive queue slots"
+        range 1 64
+        default 8
+
+    config FL_RTO_MS
+        int "Retransmit timeout in ms"
+        default 50
+
+    menu "Loopback pins"
+        config FL_LOOP_TX1
+            int "UART1 TX GPIO"
+            default 25
+        config FL_LOOP_RX1
+            int "UART1 RX GPIO"
+            default 26
+        config FL_LOOP_TX2
+            int "UART2 TX GPIO"
+            default 17
+        config FL_LOOP_RX2
+            int "UART2 RX GPIO"
+            default 16
+        config FL_LOOP_SECONDS
+            int "Seconds per throughput test"
+            default 10
+    endmenu
+
+    menu "Wi-Fi"
+        config FL_WIFI_SSID
+            string "Wi-Fi network name"
+            default ""
+        config FL_WIFI_PASSWORD
+            string "Wi-Fi password"
+            default ""
+        config FL_TCP_PORT
+            int "TCP port to listen on"
+            default 5000
+    endmenu
+
+endmenu

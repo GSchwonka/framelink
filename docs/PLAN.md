@@ -30,7 +30,7 @@ These shape every file, so they are fixed before any code is written. Changing o
 framelink/
   framelink/          framelink.h, framelink.c
   ports/esp32/        ESP-IDF project: uart_example, tcp_example
-  ports/stm32/        bare-metal Nucleo project, Makefile + arm-none-eabi-gcc
+  ports/stm32/        later: bare-metal Nucleo project, built in CI only
   host/framelink_py/  Python package + CLI
   tests/              Unity tests, CMake glue, vectors/*.json
   fuzz/               harness, corpus/, framelink.dict, run.sh
@@ -113,21 +113,27 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 
 **Exit criteria:** Python↔C interop green in CI, recovery numbers captured on host.
 
-### Weekend 3: hardware ports
+### Weekend 3: ESP32 port
 
-- [ ] ESP32: ESP-IDF project with a UART example and a TCP example. One FreeRTOS link task calls `fl_poll`.
-- [ ] STM32: bare-metal Nucleo project. USART with DMA receive into a ring buffer, SysTick provides `now_ms`.
-- [ ] Cycle counting: DWT `CYCCNT` on STM32, `esp_cpu_get_cycle_count` on ESP32, feeding the fuzz corpus through the decoder.
-- [ ] Interrupt cost: time the UART and DMA handlers at entry and exit, for MEASUREMENTS.md section 1b. Keep decoding out of interrupt context.
-- [ ] Port READMEs with exact board, wiring, and build and flash commands.
+The only hardware available is one ESP32-WROOM-32D board, so v1 is measured on ESP32 alone. An ESP32 has three UARTs, so two of them wired together replace the planned ESP32-to-STM32 link.
 
-**Exit criteria:** both boards exchange frames with the Python host.
+- [x] ESP-IDF project with four apps: echo over USB serial, echo over Wi-Fi TCP, UART1-to-UART2 loopback, and a cycle-count benchmark.
+- [x] Decoder benchmark with a worst-case input that maximises rescanning.
+- [x] CI builds every app with ESP-IDF 5.5 and 6.1.
+- [x] `bench/esp32_collect.py` reads results from the board, and `bench/host_recovery.py --device` runs recovery against it.
+- [ ] Flash and run the benchmark, bitwise and table CRC. **Needs the board.**
+- [ ] Wire GPIO25 to GPIO16 and GPIO17 to GPIO26, then run the loopback throughput tests. **Needs the board.**
+- [ ] Run interop and recovery over USB serial and over Wi-Fi. **Needs the board.**
+- [ ] Commit the raw results in `bench/results/` and fill in MEASUREMENTS.md and the README.
+- [ ] Later, optional: STM32 bare-metal port compiled in CI, clearly marked as not measured on hardware.
+
+**Exit criteria:** every ESP32 table in MEASUREMENTS.md has a real number and a raw result file.
 
 ### Weekend 4: measurements, design doc, release
 
 - [ ] Throughput at 115200 and 921600 baud, with flow control on and with credits forced to unlimited. Record overflow drops in the second case, since that contrast is the flow-control argument.
 - [ ] Hardware recovery test at 1%, 5% and 10% bit flips.
-- [ ] Interop matrix: ESP32↔Python, STM32↔Python, ESP32↔STM32.
+- [ ] Interop matrix: C↔Python over TCP, ESP32↔Python over USB serial and Wi-Fi, ESP32↔ESP32 over UART.
 - [ ] Final long fuzz run. Record iteration count, crash count, clang version and date.
 - [ ] Write `docs/MEASUREMENTS.md` with methodology per table and raw CSVs in `bench/results/`.
 - [ ] Write `docs/DESIGN.md`:
@@ -151,7 +157,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 3. `README.md`: done, measurement tables filled in weekend 4.
 4. `docs/DESIGN.md`: drafted. Background story and measured numbers added in weekend 4.
 5. `docs/MEASUREMENTS.md`: methodology drafted. Results filled in weekend 4.
-6. `fuzz/README.md`, `ports/esp32/README.md`, `ports/stm32/README.md`.
+6. `fuzz/README.md`, `ports/esp32/README.md`.
 
 ## 6. Non-goals for v1
 
@@ -163,7 +169,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 
 ## 7. Open questions
 
-- [ ] Which Nucleo board and which ESP32 variant will be used. The port READMEs must name them.
+- [x] Hardware: one ESP32-WROOM-32D dev board. No STM32 board, so STM32 is not measured in v1.
 - [ ] Confirm the header CRC-8 byte (D1). This plan and the README assume it is accepted.
 - [ ] Remove the empty outer git repo at `D:\Github Projects\FrameLink\.git`, or keep working only inside the nested clone.
 - [x] Delete or gitignore `temp-prompt.txt` before the first push.

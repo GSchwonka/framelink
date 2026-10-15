@@ -13,16 +13,14 @@ Record this for every run. Results without it are not comparable.
 | Item | Value |
 |------|-------|
 | framelink commit | TBD |
-| ESP32 board and module | TBD |
-| ESP32 CPU clock | TBD |
+| ESP32 board and module | ESP32-WROOM-32D dev board |
+| ESP32 CPU clock | 240 MHz |
 | ESP-IDF version | TBD |
-| STM32 board | TBD (Nucleo model) |
-| STM32 CPU clock | TBD |
-| arm-none-eabi-gcc version | TBD |
-| Optimisation level | `-O2` and `-Os`, both reported |
+| Compiler optimisation | `CONFIG_COMPILER_OPTIMIZATION_PERF` (`-O2`) |
 | Host OS and Python version | TBD |
-| USB-UART adapter | TBD |
-| Cable length | TBD |
+| USB-UART bridge on the board | TBD |
+
+v1 is measured on one ESP32 board. An STM32 port is planned but has no hardware to run on yet, so no STM32 numbers are claimed anywhere.
 
 ## Common rules
 
@@ -34,51 +32,37 @@ Record this for every run. Results without it are not comparable.
 
 **Question:** how much CPU does decoding cost on a small MCU?
 
-**Method:**
+**Method:** the `bench` app in [ports/esp32](../ports/esp32/README.md), collected with `bench/esp32_collect.py`.
 
-- The decoder runs on-target with no UART. It is fed from a RAM buffer, so only decoder cost is measured.
-- Cycles are counted with DWT `CYCCNT` on STM32 and `esp_cpu_get_cycle_count()` on ESP32. Interrupts are disabled during the measured loop.
+- The decoder is fed from a RAM buffer, with no UART involved, so only framelink's own work is counted.
+- Cycles are counted with `esp_cpu_get_cycle_count()`, with interrupts disabled for each 1 KB chunk.
 - Cost is `total_cycles / total_bytes`.
-- Four inputs, each at least 64 KB:
+- Four 32 KB inputs:
   1. **Clean, small:** back-to-back valid frames with 16-byte payloads.
   2. **Clean, large:** back-to-back valid frames with 255-byte payloads.
   3. **Garbage:** random bytes containing no `0x7E`. This measures the HUNT state.
-  4. **Adversarial:** input chosen to maximise rescanning, taken from the slowest inputs found by the fuzzer.
-- Each input is run with the bitwise CRC and with `FL_CRC_TABLE`.
+  4. **Worst case:** back-to-back valid headers that each announce a 255-byte payload. Each candidate fails its CRC16 only after a full frame is buffered, and the rescan finds the next header 5 bytes later, so every input byte is checked about 50 times. Random noise essentially never produces this, because it needs a valid header CRC every 5 bytes, but an attacker who controls the wire can. See [DESIGN.md](DESIGN.md#failure-modes-framelink-does-not-protect-against).
+- Each input runs with the bitwise CRC (`sdkconfig.bench`) and with `FL_CRC_TABLE` (`sdkconfig.bench_table`).
+
+**Reference point, desktop PC.** The worst case is about 60 times slower than clean input with the bitwise CRC, and 46 times slower with the table. The ESP32 numbers below decide whether it matters at a given baud rate.
 
 **Results:**
 
-| Target | CRC | Clean 16 B | Clean 255 B | Garbage | Adversarial |
-|--------|-----|------------|-------------|---------|-------------|
-| ESP32 | bitwise | TBD | TBD | TBD | TBD |
-| ESP32 | table | TBD | TBD | TBD | TBD |
-| STM32 | bitwise | TBD | TBD | TBD | TBD |
-| STM32 | table | TBD | TBD | TBD | TBD |
+| CRC16 | Clean 16 B | Clean 255 B | Garbage | Worst case |
+|-------|------------|-------------|---------|------------|
+| bitwise | TBD | TBD | TBD | TBD |
+| table | TBD | TBD | TBD | TBD |
 
 ### 1b. Interrupt cost per received byte
 
-Decoder cost is not the whole story. On a real MCU, what matters for the rest of the firmware is how long the UART interrupt holds the CPU.
-
-**Method:**
-
-- The ports never decode inside the interrupt. The interrupt or DMA handler only moves bytes into a ring buffer, and `fl_poll` decodes later in task or main-loop context.
-- On STM32, the USART interrupt handler and the DMA half-transfer and transfer-complete handlers are timed with `CYCCNT` at entry and exit. On ESP32, the UART driver event handling in the link task is timed the same way.
-- Cost per byte is total handler cycles divided by bytes received, measured during the 921600-baud throughput run.
-- The worst single handler invocation is reported too, because that sets the added interrupt latency for the rest of the system.
-
-| Target | Mode | Mean cycles per byte | Worst single invocation, cycles | Worst, µs |
-|--------|------|----------------------|---------------------------------|-----------|
-| STM32 | USART interrupt per byte | TBD | TBD | TBD |
-| STM32 | DMA + idle-line interrupt | TBD | TBD | TBD |
-| ESP32 | UART driver + link task | TBD | TBD | TBD |
+On ESP32, the UART interrupt belongs to the ESP-IDF driver, which copies bytes into a ring buffer. framelink never runs in interrupt context: `fl_poll` decodes in a normal task. Timing the driver's interrupt handler needs a custom handler, so it is not measured in v1. What framelink adds per byte is the decoder cost in section 1.
 
 ## 2. Memory footprint
 
-**Method:** `arm-none-eabi-size` and `idf.py size` on the example firmware, reporting the framelink object files only. RAM is `sizeof(fl_ctx)` plus the caller buffers for the configuration in the example.
+**Method:** the `bench` app prints `sizeof(fl_decoder)` and `sizeof(fl_link)`. Flash comes from `idf.py size-components` on the same build, framelink component only. The cross-compile job in CI also reports Cortex-M0+ and Cortex-M4 code size on every run.
 
-| Target | Flash, bitwise CRC | Flash, table CRC | `sizeof(fl_ctx)` | Buffers, window 4, queue 4 |
-|--------|--------------------|------------------|------------------|----------------------------|
-| STM32 | TBD | TBD | TBD | TBD |
+| Target | Flash, bitwise CRC | Flash, table CRC | `sizeof(fl_link)` | Buffers, window 4, queue 4 |
+|--------|--------------------|------------------|-------------------|----------------------------|
 | ESP32 | TBD | TBD | TBD | TBD |
 
 ## 3. UART throughput, with and without flow control
@@ -92,14 +76,13 @@ Decoder cost is not the whole story. On a real MCU, what matters for the rest of
 | 115200 | 8,014 B/s | 10,384 B/s | 11,212 B/s |
 | 921600 | 64,111 B/s | 83,074 B/s | 89,698 B/s |
 
-**Method:**
+**Method:** the `loopback` app in [ports/esp32](../ports/esp32/README.md). UART1 and UART2 of one ESP32 are wired to each other, so both ends are real UARTs and real framelink endpoints.
 
-- Python host sends to the MCU for 60 seconds. The MCU is the receiver.
-- The MCU application consumes frames at a fixed rate set to **50% of the ceiling** for that payload size, simulating a busy receiver.
-- Window 8, receive queue 4, `rto_ms` 50.
+- Endpoint A sends 64-byte payloads as fast as framelink allows. Endpoint B consumes frames at a fixed rate set to **50% of the ceiling**, simulating a busy receiver.
+- Window 16, receive queue 4, `rto_ms` 60 at 115200 baud and 20 at 921600 baud. Each test runs for 10 seconds.
 - **Flow control on:** normal operation.
-- **Flow control off:** the receiver is built with `FL_TEST_UNLIMITED_CREDITS`, so it always advertises 255 credits. ARQ still runs, so frames that overflow are retransmitted rather than lost.
-- Goodput is unique payload bytes delivered to the application per second.
+- **Flow control off:** A overwrites its view of the peer's credits with 255 before every send, so it behaves like a sender that ignores back-pressure. ARQ still runs, so frames that overflow are retransmitted rather than lost.
+- Goodput is unique payload bytes delivered to B's application per second.
 
 **Expected:** with flow control, goodput sits at the consumer rate, `overflows` is zero and retransmits are near zero. Without it, `overflows` and `retransmits` grow, and the wasted line time is visible as the gap between bytes sent and goodput.
 
@@ -159,23 +142,14 @@ So the published recovery test uses **16-byte payloads**. The 64-byte row is run
 
 ## 5. Interoperability matrix
 
-**Method:** each pair runs the same scripted conversation in both directions:
+**Method:** each pair exchanges frames through the echo benchmark, or the loopback app for ESP32 to ESP32. A cell passes when every frame arrives in order with zero `undetected` and zero receiver overflows.
 
-1. Handshake.
-2. 1,000 data frames with payload sizes cycling from 0 to 255.
-3. Zero-window test: the receiver stops consuming for 2 seconds, then resumes.
-4. PING and PONG.
-5. Forced link reset by unplugging or closing the transport, then a new handshake.
-
-A cell passes when every step completes with zero `undetected`, zero `overflows` and the full payload sequence verified on both sides.
-
-| Initiator \ Responder | Python host | ESP32 UART | ESP32 TCP | STM32 UART |
-|-----------------------|-------------|------------|-----------|------------|
-| **Python host** | TBD (CI) | TBD | TBD | TBD |
-| **ESP32** | TBD | — | — | TBD |
-| **STM32** | TBD | TBD | — | — |
-
-The Python-to-Python and C-to-Python host cells run in CI on every push.
+| Pair | Transport | How it runs | Result |
+|------|-----------|-------------|--------|
+| C library and Python host | TCP | CI, every push: `host/tests/test_interop.py` | ✅ |
+| ESP32 and Python host | USB serial at 921600 baud | `echo_uart` app with `bench/host_recovery.py --device serial:...` | TBD |
+| ESP32 and Python host | Wi-Fi TCP | `echo_tcp` app with `bench/host_recovery.py --device tcp:...` | TBD |
+| ESP32 and ESP32 | UART1 to UART2 | `loopback` app | TBD |
 
 ## 6. Fuzzing
 
@@ -208,7 +182,7 @@ This section is a stretch goal for v1. It is published only if all three librari
 - MIN and TinyFrame are vendored at the commits named in [DESIGN.md](DESIGN.md#prior-art), with their default configuration except where noted.
 - TinyFrame is built with `TF_InitStatic`, a 1-byte LEN and `TF_CKSUM_CRC16`, which is the closest match to framelink's integrity check.
 - MIN is built with its reliable transport enabled.
-- All three run on the same STM32 board, with the same compiler and flags, fed from the same RAM buffers as in section 1.
+- All three run on the same ESP32 board, with the same compiler and flags, fed from the same RAM buffers as in section 1.
 - **Decoder cost:** the clean and garbage inputs from section 1, re-encoded in each library's own frame format.
 - **Recovery:** a fixed stream of 10,000 frames with 16-byte payloads, each library's format, with the same corruption seed applied at r = 1%, 5% and 10%. The count is of frames the decoder accepts, before any retransmission. This isolates the resync behaviour of each decoder.
 - **Overload:** a receiver that consumes at 50% of line rate, as in section 3. Only MIN and framelink take part, since TinyFrame has no delivery guarantee. The count is of frames lost or retransmitted.

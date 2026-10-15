@@ -7,7 +7,7 @@
 
 **A dependency-free C99 library for reliable framed messaging over unreliable byte streams (UART, TCP, BLE), with CRC16-CCITT integrity, acknowledgements, credit-based back-pressure and a fuzz-tested decoder.**
 
-In one sentence: **a MIN-class protocol with explicit back-pressure, fuzzed to TBD million iterations, benchmarked on ESP32 and STM32.** Each part of that claim is checkable. The fuzz harness is in `fuzz/`, the benchmarks are in `bench/`, and the method behind every number is in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
+In one sentence: **a MIN-class protocol with explicit back-pressure, fuzzed to TBD million iterations, benchmarked on a real ESP32.** Each part of that claim is checkable. The fuzz harness is in `fuzz/`, the benchmarks are in `bench/`, and the method behind every number is in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
 
 > **Status:** in development. See [docs/PLAN.md](docs/PLAN.md) for the roadmap. Numbers in the tables below are filled in only after they are measured.
 
@@ -50,7 +50,7 @@ framelink is the library that prevents that class of bug. It is honest about whi
 | Host implementation | Python, same repo, tested in CI against C | Python, same repo | Python, Rust and JavaScript ports in separate repos |
 | **Fuzz harness** | **Yes, `fuzz/`** | No | No |
 | **CI** | **Yes** | No | No |
-| **Published CPU cost per byte** | **ESP32 and STM32** | No | No |
+| **Published CPU cost per byte** | **ESP32, including the worst case** | No | No |
 | **Published recovery under injected errors** | **1%, 5%, 10%** | No | No |
 | License | MIT | MIT | MIT |
 
@@ -128,8 +128,7 @@ The full API, with every return code, is documented in [framelink/framelink.h](f
 | Path | Contents |
 |------|----------|
 | `framelink/` | Core C99 library: `framelink.h`, `framelink.c` |
-| `ports/esp32/` | ESP-IDF + FreeRTOS examples over UART and TCP |
-| `ports/stm32/` | Bare-metal Nucleo example over USART + DMA |
+| `ports/esp32/` | ESP-IDF apps: echo peer over USB serial and Wi-Fi, on-chip UART loopback, cycle-count benchmark |
 | `host/` | Python reference implementation and CLI (`send`, `recv`, `monitor`, `bench`, `noisy`) |
 | `examples/tcp_peer/` | A complete framelink endpoint over TCP in about 300 lines of C, used for interop tests |
 | `tests/` | Unity unit tests and shared JSON test vectors, run on host in CI |
@@ -188,21 +187,21 @@ mkdir -p /tmp/fl-corpus && cp fuzz/corpus/decoder/* /tmp/fl-corpus/
 
 Methodology for every table is in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
 
-**Decoder cost**
+**Decoder cost on ESP32** (240 MHz, cycles per byte)
 
-| Target | Clock | Cycles/byte |
-|--------|-------|-------------|
-| ESP32 | TBD | TBD |
-| STM32 (Nucleo TBD) | TBD | TBD |
+| CRC16 | Clean, 16 B frames | Clean, 255 B frames | Garbage | Worst case |
+|-------|--------------------|---------------------|---------|------------|
+| bitwise | TBD | TBD | TBD | TBD |
+| table | TBD | TBD | TBD | TBD |
 
-**UART throughput**
+**UART throughput on ESP32** (UART1 to UART2 on one chip, 64-byte payloads, receiver consuming at 50% of line rate)
 
-| Baud | Flow control | Payload throughput | Frames lost |
-|------|--------------|--------------------|-------------|
-| 115200 | on | TBD | TBD |
-| 115200 | off | TBD | TBD |
-| 921600 | on | TBD | TBD |
-| 921600 | off | TBD | TBD |
+| Baud | Flow control | Goodput | Receiver overflows | Retransmits |
+|------|--------------|---------|--------------------|-------------|
+| 115200 | on | TBD | TBD | TBD |
+| 115200 | off | TBD | TBD | TBD |
+| 921600 | on | TBD | TBD | TBD |
+| 921600 | off | TBD | TBD | TBD |
 
 **Recovery under injected corruption** (share of bytes with one bit flipped, 16-byte payloads)
 
@@ -214,11 +213,11 @@ Methodology for every table is in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
 
 **Interop matrix**
 
-| | Python host | ESP32 | STM32 |
-|---|---|---|---|
-| **Python host** | ✅ CI | TBD | TBD |
-| **ESP32** | TBD | — | TBD |
-| **STM32** | TBD | TBD | — |
+| | Python host | ESP32 over USB serial | ESP32 over Wi-Fi | ESP32 UART1 to UART2 |
+|---|---|---|---|---|
+| **C library over TCP** | ✅ CI | | | |
+| **Python host** | ✅ CI | TBD | TBD | |
+| **ESP32** | | | | TBD |
 
 **Fuzzing:** TBD million iterations, TBD crashes. Toolchain and date will be recorded here.
 
