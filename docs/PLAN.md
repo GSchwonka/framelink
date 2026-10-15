@@ -37,7 +37,7 @@ framelink/
   bench/              measurement scripts, results/*.csv
   docs/                SPEC.md, DESIGN.md, MEASUREMENTS.md, PLAN.md
   .github/workflows/  ci.yml
-  CMakeLists.txt  README.md  LICENSE  CLAUDE.md  .gitignore
+  CMakeLists.txt  README.md  LICENSE  CONTRIBUTING.md  .gitignore
 ```
 
 Inside the two library files there are three layers with distinct prefixes:
@@ -77,7 +77,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 ### Weekend 1: codec, tests, fuzzing, CI
 
 - [x] Write `docs/SPEC.md`: byte diagram, field semantics, CRC parameters, control frame payloads, test vectors.
-- [ ] Write `CLAUDE.md` with build commands and the hard rules (C99, two files, no malloc, no dependencies).
+- [ ] Write `CONTRIBUTING.md` with build commands and the hard rules (C99, two files, no malloc, no dependencies).
 - [ ] Implement CRC-8 (header) and CRC16-CCITT, checked against published vectors.
 - [ ] Implement the encoder.
 - [ ] Implement the decoder states `HUNT → LEN → TYPE → SEQ → HCRC → PAYLOAD → CRC_LO → CRC_HI` with rescan on failure.
@@ -146,7 +146,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 ## 5. Documentation order
 
 1. `docs/SPEC.md`: drafted. The code is written against it.
-2. `CLAUDE.md`: enforces the constraints in every later session.
+2. `CONTRIBUTING.md`: build commands and the hard constraints every change must respect.
 3. `README.md`: done, measurement tables filled in weekend 4.
 4. `docs/DESIGN.md`: drafted. Background story and measured numbers added in weekend 4.
 5. `docs/MEASUREMENTS.md`: methodology drafted. Results filled in weekend 4.
