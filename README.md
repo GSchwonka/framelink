@@ -7,6 +7,8 @@
 
 **A dependency-free C99 library for reliable framed messaging over unreliable byte streams (UART, TCP, BLE), with CRC16-CCITT integrity, acknowledgements, credit-based back-pressure and a fuzz-tested decoder.**
 
+In one sentence: **a MIN-class protocol with explicit back-pressure, fuzzed to TBD million iterations, benchmarked on ESP32 and STM32.** Each part of that claim is checkable. The fuzz harness is in `fuzz/`, the benchmarks are in `bench/`, and the method behind every number is in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
+
 > **Status:** in development. See [docs/PLAN.md](docs/PLAN.md) for the roadmap. Numbers in the tables below are filled in only after they are measured.
 
 ---
@@ -31,6 +33,36 @@ framelink is the library that prevents that class of bug. It is honest about whi
 - **Transport-agnostic.** The core only sees `read_bytes` / `write_bytes` callbacks.
 - **No threads, no timers.** You call `fl_poll(ctx, now_ms)` from your loop or task.
 - **Two files.** Drop `framelink.h` and `framelink.c` into any C99 project.
+
+## How it compares
+
+[MIN](https://github.com/min-protocol/min) and [TinyFrame](https://github.com/MightyPork/TinyFrame) are the two open-source C libraries closest to framelink. Both are established, well-designed and MIT-licensed. framelink differs on the parts they leave out: back-pressure from the receiver, a fuzz harness, and published measurements.
+
+| | framelink | MIN 2.0 | TinyFrame |
+|---|---|---|---|
+| Frame sync | `0x7E` + header CRC-8 | 3 x `0xAA` header + byte stuffing | Optional SOF byte + header checksum |
+| Recovery after a bad frame | Rescans buffered bytes, so a frame that starts inside the bad one is kept | Waits for the next header. Stuffing makes it unambiguous | Resets to SOF hunting. Buffered bytes are dropped |
+| Integrity check | CRC-8 header + CRC16-CCITT | CRC-32 | Configurable: none, XOR, CRC-8, CRC-16, CRC-32 or custom |
+| Max payload | 255 bytes | 255 bytes | Configurable, up to 32-bit length |
+| Reliable delivery | Sequence numbers, ACK, NAK, Go-Back-N retransmit | Sequence numbers, ACK, retransmit, window up to 16 | None. Request and response are matched by ID |
+| **Flow control** | **Credit-based. The receiver advertises free slots** | None. The receiver must keep up, and out-of-sequence frames are dropped | None |
+| Dynamic allocation | Never | None | Optional. `TF_InitStatic` avoids it |
+| Host implementation | Python, same repo, tested in CI against C | Python, same repo | Python, Rust and JavaScript ports in separate repos |
+| **Fuzz harness** | **Yes, `fuzz/`** | No | No |
+| **CI** | **Yes** | No | No |
+| **Published CPU cost per byte** | **ESP32 and STM32** | No | No |
+| **Published recovery under injected errors** | **1%, 5%, 10%** | No | No |
+| License | MIT | MIT | MIT |
+
+MIN and TinyFrame were checked against their source at commits `40315e7` and `a29167a`, as of October 2026. The framelink column describes the v1 target. Rows in bold are verified as each phase of [docs/PLAN.md](docs/PLAN.md) lands. If anything here is wrong about either library, please open an issue.
+
+**When to pick something else:**
+
+- **MIN** if you want a stronger CRC-32 and a longer track record.
+- **TinyFrame** if you want configurable field widths, listeners and query/response, and you do not need delivery guarantees.
+- **framelink** if the receiver can be slower than the sender, or if you need to show evidence that the decoder survives hostile input.
+
+The design trade-offs against both libraries are discussed in [docs/DESIGN.md](docs/DESIGN.md#prior-art).
 
 ## Frame format
 
