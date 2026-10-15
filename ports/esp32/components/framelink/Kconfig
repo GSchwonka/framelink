@@ -1,0 +1,10 @@
+menu "framelink library"
+
+    config FRAMELINK_CRC_TABLE
+        bool "Use the 512-byte CRC16 lookup table"
+        default n
+        help
+            Faster CRC16 at the cost of 512 bytes of flash.
+            Both versions produce identical frames.
+
+endmenu
