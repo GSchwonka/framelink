@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.cc }}, ${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        variant: [bitwise-crc, table-crc, max-payload-64]
+        include:
+          - variant: bitwise-crc
+            flags: ""
+          - variant: table-crc
+            flags: "-DFL_CRC_TABLE=ON"
+          - variant: max-payload-64
+            flags: "-DFL_MAX_PAYLOAD=64"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFL_SANITIZE=ON ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Unit tests and corpus replay (ASan + UBSan)
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Test (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Unit tests and corpus replay
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  cross:
+    name: Cross-compile (arm-none-eabi)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+      - name: Build and measure
+        run: |
+          set -e
+          WARN="-std=c99 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror"
+          {
+            echo "### Code size of framelink.o"
+            echo
+            echo "| Target | Flags | CRC | text (bytes) | data | bss |"
+            echo "|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for cpu in cortex-m0plus cortex-m4; do
+            for opt in -Os -O2; do
+              for crc in bitwise table; do
+                def=""; [ "$crc" = table ] && def="-DFL_CRC_TABLE"
+                arm-none-eabi-gcc -mcpu=$cpu -mthumb $opt $WARN $def \
+                  -ffunction-sections -fdata-sections \
+                  -c framelink/framelink.c -o fl.o
+                read -r text data bss _ < <(arm-none-eabi-size fl.o | tail -1)
+                echo "| $cpu | $opt | $crc | $text | $data | $bss |" >> "$GITHUB_STEP_SUMMARY"
+              done
+            done
+          done
+
+  vectors:
+    name: Test vectors and corpus up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate vectors and generated header
+        run: python tests/vectors/gen_vectors.py --check
+      - name: Seed corpus matches generator
+        run: |
+          python fuzz/make_corpus.py
+          git diff --exit-code -- fuzz/corpus
+          test -z "$(git status --porcelain -- fuzz/corpus)"
+
+  fuzz:
+    name: Fuzz smoke test (libFuzzer, 60 s per harness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build harnesses
+        env:
+          CC: clang
+        run: |
+          cmake -S . -B build-fuzz -DFL_FUZZ=ON -DFL_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build-fuzz --parallel
+      - name: Run
+        run: |
+          set -e
+          mkdir -p artifacts
+          for h in decoder roundtrip; do
+            work=$(mktemp -d)
+            cp fuzz/corpus/$h/* "$work"/
+            ./build-fuzz/fuzz/fuzz_$h "$work" \
+              -dict=fuzz/framelink.dict \
+              -max_total_time=60 -timeout=5 -rss_limit_mb=1024 \
+              -artifact_prefix=artifacts/$h- \
+              -print_final_stats=1 2>&1 | tee fuzz-$h.log
+            runs=$(grep -m1 'stat::number_of_executed_units' fuzz-$h.log | awk '{print $2}')
+            echo "fuzz_$h: ${runs:-?} executions, no crashes" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: artifacts/
