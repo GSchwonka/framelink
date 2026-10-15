@@ -41,6 +41,39 @@ framelink addresses each of these with one mechanism, and each mechanism has a t
 - **No threads, no timers, no clock.** The caller passes `now_ms` into `fl_poll`. All time comparisons use unsigned subtraction, so the 49.7-day wraparound of a 32-bit millisecond counter is harmless.
 - **Transport-agnostic.** The library sees only `read_bytes` and `write_bytes`. UART, TCP and BLE differ only in the port code.
 
+## Prior art
+
+framelink was designed after reading the two closest open-source C libraries, MIN and TinyFrame. The notes below come from their source code, at MIN commit `40315e7` and TinyFrame commit `a29167a`. They describe the trade-offs each library made, not defects. Each one made sensible choices for its own goals.
+
+### MIN 2.0
+
+[MIN](https://github.com/min-protocol/min) is the closest relative. It has a C target library, a Python host library and an optional reliable transport.
+
+- **Framing.** A frame starts with three `0xAA` bytes. Inside the frame, a `0x55` is stuffed after every two consecutive `0xAA` bytes, so a header can never appear inside a frame. Resync is therefore unambiguous. The cost is a data-dependent frame size, up to about 50% larger for payloads full of `0xAA`.
+- **Integrity.** CRC-32, 4 bytes per frame. That is stronger than framelink's CRC-8 plus CRC16. framelink trades it for 1 byte less overhead and a cheaper per-byte cost on 8-bit and Cortex-M0 parts. See [the CRC section](#why-crc16-ccitt-instead-of-a-checksum).
+- **Transport.** 8-bit sequence numbers, ACKs, and a sender window of up to 16 frames. The receiver accepts only the next expected sequence number and drops the rest. The target side never asks for a retransmission. On timeout, the sender resends only the oldest unacknowledged frame.
+- **Flow control.** None from the receiver. Frames go to the application through a callback while the frame is being decoded. If the application cannot keep up, it must either block the decoder or drop data. The sender only knows about its own window and queue space.
+
+**What framelink takes from MIN:** a C target with a matching Python host in the same repository, 8-bit sequence numbers, and in-order delivery with no reorder buffer.
+
+**What framelink changes:** the receiver advertises free queue slots in every ACK, so the sender stops before the receiver overflows. Frames go into a caller-owned queue rather than straight to a callback, so the application consumes them at its own pace and that pace becomes the credit signal.
+
+### TinyFrame
+
+[TinyFrame](https://github.com/MightyPork/TinyFrame) is a flexible framing toolkit rather than a reliable link.
+
+- **Framing.** An optional SOF byte, configurable widths for ID, LEN and TYPE, and an optional header checksum. framelink's header CRC follows the same idea. TinyFrame had it first.
+- **Integrity.** Configurable: none, XOR, CRC-8, CRC-16, CRC-32 or a custom function.
+- **Recovery.** On a header or body checksum failure, the parser resets to SOF hunting and drops what it has buffered. A valid frame that started inside the failed candidate is lost, unless its SOF byte arrives after the reset. framelink rescans the buffered bytes to keep that frame. This is the "collateral drops" failure from the background section.
+- **Delivery.** No ACK, retransmission or flow control. Its ID listeners with timeouts let the application build request and response on top.
+- **Memory.** `TF_Init` uses `malloc`. `TF_InitStatic` avoids it.
+
+**What framelink takes from TinyFrame:** the header checksum, and a parser timeout driven by the caller rather than an internal timer.
+
+### What neither library publishes
+
+At the commits above, neither repository has a fuzz harness or a CI pipeline. Neither publishes CPU cost per byte on real hardware, or delivery numbers under injected corruption. These gaps are not criticisms. They are simply the gaps framelink exists to fill, which is why [MEASUREMENTS.md](MEASUREMENTS.md) is as long as it is.
+
 ## Framing without byte stuffing
 
 HDLC-style stuffing and COBS both make the SYNC byte unambiguous, so a decoder can never mistake payload for a frame start. framelink uses neither, and accepts that `0x7E` may appear inside a frame.
