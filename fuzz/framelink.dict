@@ -1,0 +1,21 @@
+# libFuzzer / AFL++ dictionary for framelink frames.
+
+sync="\x7E"
+sync_pair="\x7E\x7E"
+
+# Control frame types
+type_ack="\xF0"
+type_nak="\xF1"
+type_credit="\xF2"
+type_hello="\xF3"
+type_hello_ack="\xF4"
+type_ping="\xF5"
+type_pong="\xF6"
+
+# Length extremes
+len_zero="\x00"
+len_max="\xFF"
+
+# Complete minimal frames: empty user frame and empty CREDIT probe
+frame_empty="\x7E\x00\x01\x00\x15\x64\xF1"
+frame_credit_probe="\x7E\x00\xF2\x00\x3E\x6F\xDE"

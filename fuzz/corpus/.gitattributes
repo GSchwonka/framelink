@@ -1,0 +1,2 @@
+# Fuzz seeds are raw bytes. Never convert line endings.
+* binary
