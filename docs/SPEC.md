@@ -180,7 +180,7 @@ Rules:
 2. On HCRC failure, increment `hdr_errors`. On CRC16 failure, increment `crc_errors`.
 3. On either failure, the decoder MUST NOT discard the buffered bytes. It returns to HUNT and re-feeds the buffered bytes starting at offset 1, which is the rescan. Any valid frame that started inside the failed candidate is therefore still found.
 4. Rescanning MUST NOT recurse. Implementations use a single loop over the buffer.
-5. If `frame_timeout_ms` is non-zero and no byte arrives for that long while mid-frame, the decoder rescans immediately. This bounds the latency of recovering from a truncated frame with a large corrupted LEN.
+5. If `frame_timeout_ms` is non-zero and no byte arrives for that long while mid-frame, the partial frame is abandoned and its bytes are rescanned immediately. Complete frames found during that rescan are still delivered. This bounds the latency of recovering from a truncated frame with a large corrupted LEN. Each such event increments `timeouts`.
 6. The decoder MUST NOT read or write outside its buffer for any input. This property is what `fuzz/` tests.
 
 ## 7. Test vectors
@@ -210,6 +210,7 @@ Every conforming implementation exposes these counters. The names are normative 
 | `retransmits` | A data frame is sent again |
 | `dup_drops` | A duplicate data frame is discarded |
 | `overflows` | An in-sequence data frame is discarded because the queue is full |
+| `timeouts` | A partial frame is abandoned because no byte arrived within `frame_timeout_ms` |
 | `unknown_type` | A reserved TYPE is received |
 | `link_down` | `max_retries` is exceeded |
 
