@@ -58,7 +58,16 @@ class SerialTransport:
             import serial  # type: ignore
         except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError("serial ports need pyserial: pip install 'framelink[serial]'") from exc
-        self.port = serial.Serial(port, baud, timeout=0)
+        self.port = serial.Serial()
+        self.port.port = port
+        self.port.baudrate = baud
+        self.port.timeout = 0
+        # On ESP32 and similar dev boards, DTR and RTS drive the reset and
+        # boot pins. Keep both released so opening the port does not reset
+        # the board.
+        self.port.dtr = False
+        self.port.rts = False
+        self.port.open()
 
     def write(self, data: bytes) -> None:
         self.port.write(data)
