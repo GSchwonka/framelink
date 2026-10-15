@@ -1,0 +1,10 @@
+# Normalise text files to LF in the repository and the working tree,
+# so builds and diffs behave the same on Windows, Linux and macOS.
+* text=auto eol=lf
+
+*.bat         text eol=crlf
+*.cmd         text eol=crlf
+
+# Binary fuzz corpus and test inputs must never be touched.
+fuzz/corpus/** binary
+*.bin         binary
