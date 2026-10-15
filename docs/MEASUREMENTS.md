@@ -55,6 +55,23 @@ Record this for every run. Results without it are not comparable.
 | STM32 | bitwise | TBD | TBD | TBD | TBD |
 | STM32 | table | TBD | TBD | TBD | TBD |
 
+### 1b. Interrupt cost per received byte
+
+Decoder cost is not the whole story. On a real MCU, what matters for the rest of the firmware is how long the UART interrupt holds the CPU.
+
+**Method:**
+
+- The ports never decode inside the interrupt. The interrupt or DMA handler only moves bytes into a ring buffer, and `fl_poll` decodes later in task or main-loop context.
+- On STM32, the USART interrupt handler and the DMA half-transfer and transfer-complete handlers are timed with `CYCCNT` at entry and exit. On ESP32, the UART driver event handling in the link task is timed the same way.
+- Cost per byte is total handler cycles divided by bytes received, measured during the 921600-baud throughput run.
+- The worst single handler invocation is reported too, because that sets the added interrupt latency for the rest of the system.
+
+| Target | Mode | Mean cycles per byte | Worst single invocation, cycles | Worst, µs |
+|--------|------|----------------------|---------------------------------|-----------|
+| STM32 | USART interrupt per byte | TBD | TBD | TBD |
+| STM32 | DMA + idle-line interrupt | TBD | TBD | TBD |
+| ESP32 | UART driver + link task | TBD | TBD | TBD |
+
 ## 2. Memory footprint
 
 **Method:** `arm-none-eabi-size` and `idf.py size` on the example firmware, reporting the framelink object files only. RAM is `sizeof(fl_ctx)` plus the caller buffers for the configuration in the example.
@@ -179,3 +196,34 @@ The Python-to-Python and C-to-Python host cells run in CI on every push.
 | link | libFuzzer | TBD | TBD | TBD | TBD | TBD | TBD |
 
 The README states the headline number from this table with its date. Nothing else.
+
+## 7. Same-hardware comparison with MIN and TinyFrame
+
+**Question:** are the differences claimed in the README's comparison table visible in numbers, on the same hardware and the same input?
+
+This section is a stretch goal for v1. It is published only if all three libraries are measured under identical conditions. A comparison that is not like-for-like is worse than none.
+
+**Method:**
+
+- MIN and TinyFrame are vendored at the commits named in [DESIGN.md](DESIGN.md#prior-art), with their default configuration except where noted.
+- TinyFrame is built with `TF_InitStatic`, a 1-byte LEN and `TF_CKSUM_CRC16`, which is the closest match to framelink's integrity check.
+- MIN is built with its reliable transport enabled.
+- All three run on the same STM32 board, with the same compiler and flags, fed from the same RAM buffers as in section 1.
+- **Decoder cost:** the clean and garbage inputs from section 1, re-encoded in each library's own frame format.
+- **Recovery:** a fixed stream of 10,000 frames with 16-byte payloads, each library's format, with the same corruption seed applied at r = 1%, 5% and 10%. The count is of frames the decoder accepts, before any retransmission. This isolates the resync behaviour of each decoder.
+- **Overload:** a receiver that consumes at 50% of line rate, as in section 3. Only MIN and framelink take part, since TinyFrame has no delivery guarantee. The count is of frames lost or retransmitted.
+
+**Results:**
+
+| Metric | framelink | MIN 2.0 | TinyFrame |
+|--------|-----------|---------|-----------|
+| Decoder cycles per byte, clean 16 B | TBD | TBD | TBD |
+| Decoder cycles per byte, garbage | TBD | TBD | TBD |
+| Frames accepted by decoder, r = 1% | TBD | TBD | TBD |
+| Frames accepted by decoder, r = 5% | TBD | TBD | TBD |
+| Frames accepted by decoder, r = 10% | TBD | TBD | TBD |
+| Overload: frames dropped at receiver | TBD | TBD | n/a |
+| Overload: retransmissions | TBD | TBD | n/a |
+| Flash, decoder only | TBD | TBD | TBD |
+
+If framelink loses on any row, that row is still published, with a sentence on why.
