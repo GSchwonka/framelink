@@ -18,6 +18,7 @@ from .codec import (
     crc16,
     encode,
 )
+from .link import Busy, Config, Event, Link, LinkError, NotConnected, Stats
 
 __version__ = "0.2.0"
 
@@ -26,9 +27,16 @@ __all__ = [
     "OVERHEAD",
     "PROTOCOL_VERSION",
     "SYNC",
+    "Busy",
+    "Config",
     "Decoder",
     "DecoderStats",
+    "Event",
     "Frame",
+    "Link",
+    "LinkError",
+    "NotConnected",
+    "Stats",
     "crc8",
     "crc16",
     "encode",
