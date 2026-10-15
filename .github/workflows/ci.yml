@@ -115,6 +115,34 @@ jobs:
       - name: Test
         run: pytest host/tests -q
 
+  interop:
+    name: Interop and recovery (C peer, Python host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the C peer
+        run: |
+          cmake -S . -B build -DFL_BUILD_EXAMPLES=ON -DFL_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target fl_peer
+      - name: Install the Python host
+        run: pip install -e "host[test]"
+      - name: Interop tests
+        run: FL_PEER=build/examples/fl_peer pytest host/tests/test_interop.py -v
+      - name: Recovery under injected corruption
+        run: |
+          {
+            echo "### Host recovery: Python host and C peer over TCP"
+            echo
+            python bench/host_recovery.py --peer build/examples/fl_peer --csv recovery.csv
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-recovery
+          path: recovery.csv
+
   fuzz:
     name: Fuzz smoke test (libFuzzer, 60 s per harness)
     runs-on: ubuntu-latest
