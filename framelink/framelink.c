@@ -33,8 +33,8 @@ uint8_t fl_crc8(const uint8_t *data, size_t len)
         unsigned bit;
         crc = (uint8_t)(crc ^ *data++);
         for (bit = 0; bit < 8u; bit++) {
-            crc = (crc & 0x80u) ? (uint8_t)((uint8_t)(crc << 1) ^ 0x07u)
-                                : (uint8_t)(crc << 1);
+            crc = (uint8_t)((crc & 0x80u) ? ((unsigned)crc << 1) ^ 0x07u
+                                          : ((unsigned)crc << 1));
         }
     }
     return crc;
@@ -87,8 +87,8 @@ uint16_t fl_crc16_update(uint16_t crc, uint8_t byte)
     unsigned bit;
     crc = (uint16_t)(crc ^ (uint16_t)((uint16_t)byte << 8));
     for (bit = 0; bit < 8u; bit++) {
-        crc = (crc & 0x8000u) ? (uint16_t)((uint16_t)(crc << 1) ^ 0x1021u)
-                              : (uint16_t)(crc << 1);
+        crc = (uint16_t)((crc & 0x8000u) ? ((unsigned)crc << 1) ^ 0x1021u
+                                         : ((unsigned)crc << 1));
     }
     return crc;
 #endif
