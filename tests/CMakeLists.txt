@@ -12,3 +12,12 @@ if(NOT MSVC)
 endif()
 
 add_test(NAME codec COMMAND test_codec)
+
+add_executable(test_link test_link.c)
+target_link_libraries(test_link PRIVATE framelink unity)
+set_target_properties(test_link PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+if(NOT MSVC)
+    target_compile_options(test_link PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME link COMMAND test_link)
