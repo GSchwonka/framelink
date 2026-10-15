@@ -32,7 +32,7 @@ static EventGroupHandle_t wifi_events;
 
 static uint8_t tx_buf[FL_TX_BUF_SIZE(CONFIG_FL_WINDOW)];
 static uint8_t rx_buf[FL_RX_BUF_SIZE(CONFIG_FL_SLOTS)];
-static fl_link link;
+static fl_link peer_link;
 static echo_state echo;
 
 typedef struct conn {
@@ -130,11 +130,11 @@ static void serve(int client)
     };
 
     setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    ESP_ERROR_CHECK(fl_init(&link, &cfg) == FL_OK ? ESP_OK : ESP_ERR_INVALID_ARG);
+    ESP_ERROR_CHECK(fl_init(&peer_link, &cfg) == FL_OK ? ESP_OK : ESP_ERR_INVALID_ARG);
     memset(&echo, 0, sizeof echo);
     while (!c.closed) {
-        fl_poll(&link, fl_now_ms());
-        fl_echo_step(&link, &echo);
+        fl_poll(&peer_link, fl_now_ms());
+        fl_echo_step(&peer_link, &echo);
         vTaskDelay(1);
     }
     ESP_LOGI(TAG, "client left after %u echoed frames", (unsigned)echo.echoed);

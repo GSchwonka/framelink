@@ -22,7 +22,7 @@
 
 static uint8_t tx_buf[FL_TX_BUF_SIZE(CONFIG_FL_WINDOW)];
 static uint8_t rx_buf[FL_RX_BUF_SIZE(CONFIG_FL_SLOTS)];
-static fl_link link;
+static fl_link peer_link;
 static echo_state echo;
 
 void app_echo_uart(void)
@@ -42,11 +42,11 @@ void app_echo_uart(void)
     };
 
     fl_uart_setup(UART_NUM_0, CONFIG_FL_UART_BAUD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    ESP_ERROR_CHECK(fl_init(&link, &cfg) == FL_OK ? ESP_OK : ESP_ERR_INVALID_ARG);
+    ESP_ERROR_CHECK(fl_init(&peer_link, &cfg) == FL_OK ? ESP_OK : ESP_ERR_INVALID_ARG);
 
     for (;;) {
-        fl_poll(&link, fl_now_ms());
-        fl_echo_step(&link, &echo);
+        fl_poll(&peer_link, fl_now_ms());
+        fl_echo_step(&peer_link, &echo);
         vTaskDelay(1); /* 1 ms with CONFIG_FREERTOS_HZ=1000 */
     }
 }
