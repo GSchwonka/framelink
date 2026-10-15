@@ -130,11 +130,31 @@ The full API, with every return code, is documented in [framelink/framelink.h](f
 | `framelink/` | Core C99 library: `framelink.h`, `framelink.c` |
 | `ports/esp32/` | ESP-IDF + FreeRTOS examples over UART and TCP |
 | `ports/stm32/` | Bare-metal Nucleo example over USART + DMA |
-| `host/` | Python reference implementation and CLI (`send`, `recv`, `monitor`, `bench`) |
+| `host/` | Python reference implementation and CLI (`send`, `recv`, `monitor`, `bench`, `noisy`) |
+| `examples/tcp_peer/` | A complete framelink endpoint over TCP in about 300 lines of C, used for interop tests |
 | `tests/` | Unity unit tests and shared JSON test vectors, run on host in CI |
 | `fuzz/` | libFuzzer / AFL++ harness for the decoder, with corpus |
 | `bench/` | Measurement scripts and raw result CSVs |
 | `docs/` | `SPEC.md`, `DESIGN.md`, `MEASUREMENTS.md`, `PLAN.md` |
+
+## Talking to a device from a laptop
+
+The Python package in [host/](host/README.md) speaks the same protocol as the C library.
+
+```sh
+pip install -e "host[serial]"
+framelink monitor serial:/dev/ttyUSB0@921600          # decode and print every frame on the wire
+framelink send serial:/dev/ttyUSB0@921600 "hello"     # send and wait for the acknowledgement
+framelink recv tcp:192.168.1.50:5000 --text           # print everything a device sends
+```
+
+To see recovery for yourself, run the C peer and push traffic through 5% byte corruption:
+
+```sh
+cmake -B build -DFL_BUILD_EXAMPLES=ON && cmake --build build --target fl_peer
+./build/examples/fl_peer --listen 5000 --rto 20 --retries 255 &
+framelink bench tcp:127.0.0.1:5000 --count 300 --corrupt 0.05 --rto 20 --retries 255
+```
 
 ## Building and testing
 
@@ -153,6 +173,7 @@ ctest --test-dir build --output-on-failure
 | `FL_SANITIZE` | `OFF` | AddressSanitizer and UBSan, GCC and Clang only |
 | `FL_BUILD_TESTS` | `ON` at top level | Unit tests and corpus replay |
 | `FL_FUZZ` | `OFF` | libFuzzer harnesses, clang only |
+| `FL_BUILD_EXAMPLES` | `OFF` | The TCP peer in `examples/tcp_peer` |
 
 Fuzzing needs clang on Linux, macOS or WSL2. See [fuzz/README.md](fuzz/README.md) for details.
 

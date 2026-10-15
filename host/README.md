@@ -42,6 +42,20 @@ while True:
             pass                          # window full or peer out of credits
 ```
 
+## Command-line tool
+
+Installing the package adds a `framelink` command. A transport is `tcp:HOST:PORT`, `listen:PORT` or `serial:PORT@BAUD`.
+
+| Command | What it does |
+|---------|--------------|
+| `framelink monitor TRANSPORT` | Decode a raw byte stream and print every frame, with decoder statistics at the end |
+| `framelink send TRANSPORT MSG...` | Connect, send each message as a frame, and wait until all are acknowledged |
+| `framelink recv TRANSPORT [--text]` | Connect and print every frame received |
+| `framelink bench TRANSPORT [--corrupt R]` | Echo benchmark against `fl_peer`, optionally corrupting a fraction R of bytes in both directions |
+| `framelink noisy --listen P --target H:P --corrupt R` | TCP proxy that corrupts bytes in both directions, for testing any two endpoints |
+
+The benchmark puts a frame counter and a CRC-32 inside every payload, checked outside framelink. Any corruption that slipped past framelink's own CRCs would show up as `undetected`.
+
 ## Tests
 
 ```sh
@@ -50,3 +64,5 @@ pytest host/tests
 ```
 
 The codec tests read `tests/vectors/frames.json`, the same file the C tests use. The link tests mirror `tests/test_link.c`.
+
+The interop tests run against the C library through `examples/tcp_peer`. Build it with `-DFL_BUILD_EXAMPLES=ON`, then set `FL_PEER` to its path. Without `FL_PEER` they are skipped.
