@@ -182,11 +182,25 @@ Worked example with window 4:
 
 8-bit sequence numbers were chosen over 16-bit because a 127-frame window is far more than a serial link needs, and every frame saves a byte. The wraparound test sends thousands of frames through the maximum window with random loss and checks strict ordering.
 
+## Handshake and session IDs
+
+A handshake has to answer one question: does the peer's sequence state match mine? Both sides start at SEQ 0 after a handshake, so a reset on one side must reset the other.
+
+The naive rule, "reset whenever a HELLO arrives", has a race. A peer sends HELLO, waits one `rto_ms`, and sends it again because the HELLO_ACK has not arrived yet. If the second HELLO reaches the other side after the link is up and data has flowed, that side resets a perfectly good link. Sequence numbers then disagree and the link has to fail and recover.
+
+framelink solves this with a one-byte session ID in every HELLO, chosen afresh each time a peer starts a link:
+
+- A HELLO with a **new** session ID means the peer really restarted. Reset and reply.
+- A HELLO with the **same** session ID is a retransmission. Reply, but change nothing.
+- A HELLO_ACK must **echo** the receiver's own current session ID, so a late HELLO_ACK from an earlier attempt is ignored.
+
+The ID only has to differ between consecutive sessions of the same peer, so one byte is enough. The application seeds it at boot, ideally from a random source. If a rebooted peer happens to reuse its last ID, the link still heals: the sequence numbers disagree, retries run out, both sides declare the link down, and the next handshake uses new IDs. That recovery path is covered by tests.
+
 ## Link reset and delivery guarantees
 
 - Within one session, delivery is **exactly once and in order**.
 - When `max_retries` is exceeded, the link goes down and the handshake restarts with fresh sequence numbers.
-- Frames that were unacknowledged at that moment are reported to the application through `on_link_down`, not silently resent. Some of them may already have been delivered, because the data frame arrived but its ACK was lost.
+- Frames that were unacknowledged at that moment are reported to the application through the `FL_EV_LINK_DOWN` event, with their count, not silently resent. Some of them may already have been delivered, because the data frame arrived but its ACK was lost.
 - Across a reset, delivery is therefore **at most once, with unknown status for in-flight frames**. The application decides whether to resend them. Applications that need exactly-once across resets should put an idempotency key in the payload.
 
 This limit is fundamental. Solving it needs state that survives the reset, which contradicts the goal of a small, stateless-at-boot library.
