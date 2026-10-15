@@ -83,12 +83,14 @@ The design trade-offs against both libraries are discussed in [docs/DESIGN.md](d
 ```c
 #include "framelink.h"
 
-static uint8_t tx_buf[FL_TX_BUF_SIZE(4)];   /* 4-frame send window  */
+static uint8_t tx_buf[FL_TX_BUF_SIZE(4)];   /* 4-frame send window   */
 static uint8_t rx_buf[FL_RX_BUF_SIZE(4)];   /* 4-frame receive queue */
-static fl_ctx  link;
+static fl_link link;
 
-static void on_frame(void *user, uint8_t type, const uint8_t *p, size_t n) {
-    /* handle an in-order, CRC-checked, de-duplicated frame */
+static void on_event(void *user, fl_event ev, uint8_t arg) {
+    if (ev == FL_EV_LINK_DOWN) {
+        /* `arg` frames were never acknowledged. Resend them if needed. */
+    }
 }
 
 void app_init(void) {
@@ -96,21 +98,30 @@ void app_init(void) {
         .tx_buf = tx_buf, .tx_buf_len = sizeof tx_buf,
         .rx_buf = rx_buf, .rx_buf_len = sizeof rx_buf,
         .window = 4, .rto_ms = 50, .max_retries = 5,
+        .session_seed = (uint8_t)random_seed(),
         .write_bytes = uart_write, .read_bytes = uart_read,
-        .on_frame = on_frame,
+        .on_event = on_event,
     };
     fl_init(&link, &cfg);
 }
 
 void app_loop(void) {
-    fl_poll(&link, millis());
-    if (fl_send(&link, 0x01, sensor_data, sizeof sensor_data) == FL_EBUSY) {
-        /* window full or receiver out of credits: try again later */
+    uint8_t type, buf[FL_MAX_PAYLOAD];
+    size_t len;
+
+    fl_poll(&link, millis());   /* reads, acknowledges, retransmits */
+
+    while (fl_recv(&link, &type, buf, sizeof buf, &len) == FL_OK) {
+        /* in order, CRC-checked, exactly once. Each fl_recv frees a credit. */
+    }
+
+    if (fl_send(&link, 0x01, sensor_data, sizeof sensor_data, NULL) == FL_EBUSY) {
+        /* window full or receiver out of credits: try again next loop */
     }
 }
 ```
 
-The API is still being finalised. The authoritative version will be in `framelink/framelink.h`.
+The full API, with every return code, is documented in [framelink/framelink.h](framelink/framelink.h).
 
 ## Repository layout
 
