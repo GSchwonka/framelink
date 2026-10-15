@@ -77,21 +77,21 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 ### Weekend 1: codec, tests, fuzzing, CI
 
 - [x] Write `docs/SPEC.md`: byte diagram, field semantics, CRC parameters, control frame payloads, test vectors.
-- [ ] Write `CONTRIBUTING.md` with build commands and the hard rules (C99, two files, no malloc, no dependencies).
-- [ ] Implement CRC-8 (header) and CRC16-CCITT, checked against published vectors.
-- [ ] Implement the encoder.
-- [ ] Implement the decoder states `HUNT → LEN → TYPE → SEQ → HCRC → PAYLOAD → CRC_LO → CRC_HI` with rescan on failure.
-- [ ] Unity tests:
-  - [ ] Round trip for payload sizes 0, 1, 254, 255.
-  - [ ] Each header byte corrupted in turn.
-  - [ ] Truncated frame followed by a valid frame: the valid one is delivered.
-  - [ ] `0x7E` inside payload and inside CRC bytes.
-  - [ ] Random garbage prefix before a valid frame.
-  - [ ] Two back-to-back frames split at every possible byte boundary.
-  - [ ] Exhaustive check that HCRC detects every 1, 2 and 3-bit header error (see DESIGN.md).
-- [ ] Shared JSON vectors in `tests/vectors/`, used later by the Python tests too.
-- [ ] Fuzz harness with seed corpus and dictionary. Run at least 1 million iterations.
-- [ ] CI: gcc and clang, `-Wall -Wextra -Wpedantic -Wconversion -Werror`, ASan + UBSan test run, 60-second fuzz smoke run.
+- [x] Write `CONTRIBUTING.md` with build commands and the hard rules (C99, two files, no malloc, no dependencies).
+- [x] Implement CRC-8 (header) and CRC16-CCITT, checked against published vectors.
+- [x] Implement the encoder.
+- [x] Implement the decoder states `HUNT → LEN → TYPE → SEQ → HCRC → PAYLOAD → CRC_LO → CRC_HI` with rescan on failure.
+- [x] Unity tests:
+  - [x] Round trip for payload sizes 0, 1, 254, 255.
+  - [x] Each header byte corrupted in turn.
+  - [x] Truncated frame followed by a valid frame: the valid one is delivered.
+  - [x] `0x7E` inside payload and inside CRC bytes.
+  - [x] Random garbage prefix before a valid frame.
+  - [x] Two back-to-back frames split at every possible byte boundary.
+  - [x] Exhaustive check that HCRC detects every 1, 2 and 3-bit header error (see DESIGN.md).
+- [x] Shared JSON vectors in `tests/vectors/`, used later by the Python tests too.
+- [x] Fuzz harness with seed corpus and dictionary. Run at least 1 million iterations. First CI run: 1.7 million decoder and 5.4 million round-trip executions in 60 seconds each, no crashes.
+- [x] CI: gcc and clang, `-Wall -Wextra -Wpedantic -Wconversion -Werror`, ASan + UBSan test run, 60-second fuzz smoke run.
 
 **Exit criteria:** CI green, decoder fuzzed with zero crashes, spec matches implementation.
 
