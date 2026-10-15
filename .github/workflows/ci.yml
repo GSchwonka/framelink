@@ -143,6 +143,24 @@ jobs:
           name: host-recovery
           path: recovery.csv
 
+  esp32:
+    name: ESP32 firmware (${{ matrix.app }}, ESP-IDF ${{ matrix.idf }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        idf: [v5.5.5, v6.1]
+        app: [echo_uart, loopback, echo_tcp, bench, bench_table]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ matrix.idf }}
+          target: esp32
+          path: ports/esp32
+          command: idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.${{ matrix.app }}" build
+
   fuzz:
     name: Fuzz smoke test (libFuzzer, 60 s per harness)
     runs-on: ubuntu-latest
