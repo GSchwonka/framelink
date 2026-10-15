@@ -117,6 +117,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 - [ ] ESP32: ESP-IDF project with a UART example and a TCP example. One FreeRTOS link task calls `fl_poll`.
 - [ ] STM32: bare-metal Nucleo project. USART with DMA receive into a ring buffer, SysTick provides `now_ms`.
 - [ ] Cycle counting: DWT `CYCCNT` on STM32, `esp_cpu_get_cycle_count` on ESP32, feeding the fuzz corpus through the decoder.
+- [ ] Interrupt cost: time the UART and DMA handlers at entry and exit, for MEASUREMENTS.md section 1b. Keep decoding out of interrupt context.
 - [ ] Port READMEs with exact board, wiring, and build and flash commands.
 
 **Exit criteria:** both boards exchange frames with the Python host.
@@ -135,6 +136,9 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
   - [ ] Sequence wraparound and the window <= 127 rule.
   - [ ] Failure modes framelink does not protect against.
   - [ ] Non-goals and what v2 might add.
+- [ ] Stretch: same-hardware comparison with MIN and TinyFrame, MEASUREMENTS.md section 7. Publish only if all three are measured like-for-like.
+- [ ] Re-check the README comparison table against the latest MIN and TinyFrame commits, and update the commit hashes and date.
+- [ ] Replace "TBD million iterations" in the README's one-sentence claim with the measured number.
 - [ ] Fill the README tables, then tag `v1.0.0`.
 
 **Exit criteria:** every README table has a real number with a linked methodology.
@@ -161,4 +165,7 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 - [ ] Which Nucleo board and which ESP32 variant will be used. The port READMEs must name them.
 - [ ] Confirm the header CRC-8 byte (D1). This plan and the README assume it is accepted.
 - [ ] Remove the empty outer git repo at `D:\Github Projects\FrameLink\.git`, or keep working only inside the nested clone.
-- [ ] Delete or gitignore `temp-prompt.txt` before the first push.
+- [x] Delete or gitignore `temp-prompt.txt` before the first push.
+- [ ] Positioning. The README currently frames framelink as "a MIN-class protocol with explicit back-pressure", compared against MIN and TinyFrame. Two alternatives were considered:
+  - Contribute credit-based flow control and a fuzz harness upstream to MIN instead. That puts the work in front of MIN's existing users and shows work in someone else's codebase, at the cost of control over scope and timing. Credits change MIN's ACK payload, so this would need the maintainers to accept a wire-format change.
+  - Present framelink as a teaching reference: "the smallest complete, correct, documented implementation of framing, ARQ and flow control", with DESIGN.md as the main product. The current docs already support this angle, so it can be added later without rework.
