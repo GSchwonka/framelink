@@ -83,8 +83,8 @@ uint16_t fl_crc16(const uint8_t *p, size_t n) {
 | `0xF0` | ACK | control | `ack_seq(1) credits(1)` |
 | `0xF1` | NAK | control | `nak_seq(1) credits(1)` |
 | `0xF2` | CREDIT | control | empty (probe) or `ack_seq(1) credits(1)` (update) |
-| `0xF3` | HELLO | control | `version(1) window(1) credits(1) flags(1)` |
-| `0xF4` | HELLO_ACK | control | `version(1) window(1) credits(1) flags(1)` |
+| `0xF3` | HELLO | control | `version(1) window(1) credits(1) flags(1) session(1)` |
+| `0xF4` | HELLO_ACK | control | `version(1) window(1) credits(1) flags(1) session(1) echo(1)` |
 | `0xF5` | PING | control | 0..8 bytes, echoed |
 | `0xF6` | PONG | control | copy of the PING payload |
 | `0xF7`-`0xFF` | reserved | control | A receiver MUST discard them and increment `unknown_type` |
@@ -103,11 +103,17 @@ uint16_t fl_crc16(const uint8_t *p, size_t n) {
 
 ### 5.2 Handshake
 
-1. On start-up, or after a link-down event, a peer sends HELLO and repeats it every `rto_ms` until it receives HELLO or HELLO_ACK.
-2. A peer that receives HELLO MUST reset its sequence state in both directions, then reply with HELLO_ACK.
-3. `version` is `0x01`. A peer receiving a different version MUST NOT send data frames and SHOULD report the mismatch to the application.
-4. `window` is the sender's window size. `credits` is the receiver's initial free queue slots. `flags` is reserved and MUST be `0x00`.
-5. Before the handshake completes, a peer MUST NOT send data frames and MUST discard any data frames it receives.
+Each peer picks a **session ID** whenever it starts a link: at start-up and after every link-down event. It identifies one lifetime of the sequence state. Consecutive sessions of the same peer MUST use different IDs. Implementations derive the first ID from a seed the application provides, ideally random, and increment it for each new session.
+
+1. While not connected, a peer sends HELLO with its own session ID every `rto_ms`.
+2. On receiving HELLO with a session ID different from the one it last saw from that peer, a peer MUST reset its sequence state in both directions, record the new peer session ID, and reply with HELLO_ACK. Its `echo` field carries the session ID from the HELLO.
+3. On receiving HELLO with the session ID it already recorded, the peer MUST NOT reset anything. It only replies with HELLO_ACK again. Such a HELLO is a retransmission that crossed an earlier HELLO_ACK, and resetting would destroy a working link.
+4. A peer becomes **connected** when it receives either a HELLO from the peer, after resetting as in rule 2, or a HELLO_ACK whose `echo` equals its own current session ID. A HELLO_ACK with any other `echo` is stale and is ignored.
+5. `version` is `0x01`. A peer receiving a different version MUST ignore the frame, MUST NOT connect, and SHOULD report the mismatch to the application.
+6. `window` is the sender's window size and is informational. `credits` is the sender's initial free receive slots, which becomes the peer's initial `peer_credits`. `flags` is reserved and MUST be `0x00`.
+7. Before it is connected, a peer MUST NOT send data frames and MUST discard any data frames it receives.
+
+If a peer restarts and happens to reuse its previous session ID, the other side does not reset. The sequence numbers then disagree, retransmissions run out, both sides declare the link down, and the next handshake uses fresh IDs. The link heals, but slowly, which is why the seed should be random.
 
 ### 5.3 Sending data
 
@@ -122,7 +128,7 @@ A new data frame MAY be sent only when both conditions hold:
 
 `peer_credits` is the credit count from the most recent ACK, NAK or CREDIT update. Credits are counted from `snd_una`, so a stale ACK can never grant more room than the receiver actually has.
 
-Each unacknowledged frame has a retransmit deadline of `now + rto_ms`. When the oldest deadline expires, the sender retransmits every unacknowledged frame from `snd_una` in order, which is Go-Back-N. Each retransmission of `snd_una` increments its retry counter. When the counter exceeds `max_retries`, the link is declared down, and the handshake restarts.
+The sender runs one retransmit timer, for the frame at `snd_una`. It is started when that frame is sent and restarted whenever `snd_una` advances or a retransmission happens. When it expires, the sender retransmits every unacknowledged frame from `snd_una` in order, which is Go-Back-N, and increments a retry counter. The counter resets to zero whenever `snd_una` advances. When it exceeds `max_retries`, the link is declared down. Every unacknowledged frame is reported to the application as undelivered, and the handshake restarts with a new session ID.
 
 ### 5.4 Receiving data
 
@@ -138,18 +144,20 @@ The receiver keeps `rcv_nxt`, the next SEQ it expects.
 - ACK carries `ack_seq = rcv_nxt - 1`, the last SEQ delivered in order, and `credits`, the free slots in the receive queue. Before any data is received, `ack_seq` is `0xFF`.
 - When a data frame passes HCRC but fails CRC16, the header is trusted. The receiver SHOULD send NAK for `rcv_nxt` immediately, which avoids waiting for a timeout.
 - The receiver MUST send at most one NAK per value of `rcv_nxt`. Later out-of-order frames for the same gap are discarded silently. Without this rule, every frame still in flight triggers another full Go-Back-N retransmission.
-- The receiver MAY coalesce ACKs, but MUST send one within `rto_ms / 2` of accepting a frame.
+- The receiver MAY coalesce ACKs, but MUST send one within `rto_ms / 2` of accepting a frame. The reference implementations send one ACK per accepted or duplicate frame.
 
 ### 5.5 ACK and NAK processing
 
 - On ACK or NAK, the sender releases every frame from `snd_una` through `ack_seq`, sets `snd_una = ack_seq + 1`, and updates `peer_credits`.
 - For NAK, `ack_seq` is `nak_seq - 1`. After releasing, the sender retransmits from `nak_seq` immediately.
-- ACKs whose `ack_seq` is before `snd_una - 1` are stale. The sender updates nothing except that it MAY use the credits if they are larger.
+- An ACK whose `ack_seq` is `snd_una - 1` acknowledges nothing new. The sender only updates `peer_credits` from it.
+- An ACK whose `ack_seq` is outside `snd_una - 1 .. snd_nxt - 1` is stale or invalid. The sender MUST ignore it entirely, including its credits, because those credits were counted from a different point.
 
 ### 5.6 Credit updates and zero-window probing
 
 - When the application consumes frames and the receive queue goes from full to non-full, the receiver SHOULD send a CREDIT update with the current `ack_seq` and `credits`.
-- That update can be lost. A sender with pending data and `peer_credits == 0` MUST send an empty CREDIT probe every `rto_ms`. The receiver MUST answer a probe with a CREDIT update.
+- That update can be lost. A sender that refused a send because `peer_credits` was exhausted MUST send an empty CREDIT probe every `rto_ms` until credits arrive. The receiver MUST answer a probe with a CREDIT update.
+- A CREDIT update is processed exactly like an ACK.
 - Probes do not count towards `max_retries`. A receiver that is alive but full is not a dead link.
 
 ### 5.7 Keepalive
@@ -193,7 +201,7 @@ All bytes are hex. These vectors live in `tests/vectors/frames.json` and are use
 | Short data frame | `01` | `05` | `"hello"` | `7E 05 01 05 CE 68 65 6C 6C 6F 3B AC` |
 | SYNC bytes inside payload | `10` | `FF` | `7E 7E 00` | `7E 03 10 FF 19 7E 7E 00 E8 69` |
 | ACK, ack_seq 5, credits 4 | `F0` | `00` | `05 04` | `7E 02 F0 00 C2 05 04 E0 4D` |
-| HELLO, v1, window 8, credits 8 | `F3` | `00` | `01 08 08 00` | `7E 04 F3 00 80 01 08 08 00 25 BD` |
+| HELLO, v1, window 8, credits 8, session 0x5A | `F3` | `00` | `01 08 08 00 5A` | `7E 05 F3 00 EB 01 08 08 00 5A 50 DF` |
 
 ## 8. Statistics
 
