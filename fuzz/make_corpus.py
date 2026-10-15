@@ -62,6 +62,35 @@ def main() -> None:
     write("roundtrip", "max_payload", bytes([0x02, 0x80, 0x99]) + bytes(range(255)))
     write("roundtrip", "over_max", bytes([0x02, 0x81, 0x10]) + bytes(300))
 
+    # Link seeds: a tiny program for fuzz_link.c. The fuzzer plays the peer.
+    def feed(frame: bytes) -> bytes:
+        assert 1 <= len(frame) <= 64
+        return bytes([len(frame) - 1]) + frame
+
+    def poll(ms3: int) -> bytes:
+        return bytes([0x40 | ms3])
+
+    def send(ftype: int, payload: bytes) -> bytes:
+        return bytes([0x80 | ftype]) + payload.ljust(16, b"\x00")
+
+    recv = bytes([0xFF])
+    hello = feed(encode(0xF3, 0, bytes([1, 4, 3, 0, 0x99])))
+    hello_ack = feed(encode(0xF4, 0, bytes([1, 4, 3, 0, 0x99, 0x42])))
+    write("link", "peer_hello", poll(1) + hello)
+    write("link", "hello_ack", poll(1) + hello_ack + poll(1))
+    write("link", "send_and_ack", poll(1) + hello + send(1, b"data") + feed(encode(0xF0, 0, bytes([0, 3]))))
+    write("link", "send_and_nak", poll(1) + hello + send(1, b"a") + send(1, b"b") + feed(encode(0xF1, 0, bytes([0, 3]))))
+    write("link", "peer_data_and_recv", poll(1) + hello + feed(encode(0x07, 0, b"hi")) + recv
+          + feed(encode(0x07, 1, b"there")) + feed(encode(0x07, 1, b"there")) + recv + recv)
+    write("link", "out_of_order", poll(1) + hello + feed(encode(0x07, 2, b"late")) + feed(encode(0x07, 0, b"x")))
+    write("link", "credit_probe", poll(1) + hello + feed(encode(0xF2, 0, b"")))
+    write("link", "zero_credit_then_update", poll(1) + feed(encode(0xF3, 0, bytes([1, 4, 0, 0, 0x99])))
+          + send(1, b"blocked") + poll(5) + poll(5) + feed(encode(0xF2, 0, bytes([0xFF, 2]))) + send(1, b"go"))
+    write("link", "retries_to_link_down", poll(1) + hello + send(1, b"lost") + poll(63) * 6 + poll(1))
+    write("link", "peer_restart", poll(1) + hello + send(1, b"x")
+          + feed(encode(0xF3, 0, bytes([1, 4, 3, 0, 0x55]))) + poll(1))
+    write("link", "ping", poll(1) + feed(encode(0xF5, 0, bytes([1, 2, 3]))) + feed(encode(0xF6, 0, b"")))
+
     print(f"wrote {sum(1 for _ in CORPUS.rglob('*.bin'))} seeds to {CORPUS.relative_to(ROOT)}")
 
 

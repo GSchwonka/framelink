@@ -113,7 +113,7 @@ jobs:
         run: |
           set -e
           mkdir -p artifacts
-          for h in decoder roundtrip; do
+          for h in decoder roundtrip link; do
             work=$(mktemp -d)
             cp fuzz/corpus/$h/* "$work"/
             ./build-fuzz/fuzz/fuzz_$h "$work" \

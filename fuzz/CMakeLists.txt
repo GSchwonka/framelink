@@ -3,7 +3,7 @@
 #   fuzz_<name>_replay   plain binary that replays the committed corpus. It
 #                        builds with any compiler and ctest runs it as a
 #                        regression test.
-set(FL_FUZZ_HARNESSES decoder roundtrip)
+set(FL_FUZZ_HARNESSES decoder roundtrip link)
 
 foreach(name IN LISTS FL_FUZZ_HARNESSES)
     set(src ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_${name}.c)

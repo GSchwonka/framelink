@@ -8,6 +8,7 @@ The decoder reads bytes from an untrusted wire. It must never crash, read or wri
 |---------|-------|--------|
 | `fuzz_decoder` | Raw byte stream. The first byte selects the feed chunk size and how often the inter-byte timeout fires | No ASan or UBSan error. Every delivered frame is within `FL_MAX_PAYLOAD` and re-encodes to a frame that decodes back to itself. Frame counter matches callbacks. No partial frame left after the final timeout |
 | `fuzz_roundtrip` | `TYPE SEQ SPLIT PAYLOAD...` | Encoding then decoding, split at any point, returns exactly one identical frame with no errors counted |
+| `fuzz_link` | A small program of opcodes: feed bytes, advance the clock, send, receive. The fuzzer plays the peer and can forge any control frame | No ASan or UBSan error. Frames in flight never exceed the window, the receive queue never exceeds its slots, every byte the link writes is a whole valid frame, and received frames fit the buffer |
 
 Both are plain `LLVMFuzzerTestOneInput` functions, so they work with libFuzzer, and with AFL++ through `standalone_main.c`.
 
