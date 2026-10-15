@@ -15,6 +15,7 @@ option(FL_BUILD_TESTS "Build the unit tests and corpus replay tests" ${FL_TOP_LE
 option(FL_CRC_TABLE   "Use the 512-byte CRC16 lookup table" OFF)
 option(FL_SANITIZE    "Build everything with AddressSanitizer and UBSan" OFF)
 option(FL_FUZZ        "Build libFuzzer harnesses (requires clang)" OFF)
+option(FL_BUILD_EXAMPLES "Build example programs such as the TCP peer" OFF)
 set(FL_MAX_PAYLOAD "" CACHE STRING "Override the maximum payload length, 0..255")
 
 if(FL_SANITIZE)
@@ -71,4 +72,8 @@ endif()
 
 if(FL_BUILD_TESTS OR FL_FUZZ)
     add_subdirectory(fuzz)
+endif()
+
+if(FL_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()

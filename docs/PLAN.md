@@ -97,18 +97,19 @@ fl_stats fl_get_stats(const fl_ctx *ctx);  /* crc_errors, hdr_errors, resyncs, r
 
 ### Weekend 2: link layer and Python host
 
-- [ ] Send window with per-frame retransmit deadlines.
-- [ ] Cumulative ACK carrying credits. NAK when a frame with a known sequence fails its CRC16.
-- [ ] Duplicate detection on the receiver.
-- [ ] Credit accounting: credits released when the application consumes a frame.
-- [ ] HELLO handshake that resets sequences and advertises initial credits.
-- [ ] `max_retries` exhaustion triggers `on_link_down`.
-- [ ] Unit tests for wraparound: send 1000 frames through a window of 127 and check ordering.
-- [ ] Unit tests with a simulated lossy loopback: drops, duplicates, reordering.
-- [ ] Python package `host/framelink_py` implementing the same protocol, tested against the shared JSON vectors.
-- [ ] Python CLI: `send`, `recv`, `monitor` (decode and pretty-print), `bench`, `noisy` (bit-flip proxy).
-- [ ] Interop test in CI: C test binary talks to Python over a TCP socket.
-- [ ] Host-only recovery test at 1%, 5% and 10% bit flips through the `noisy` proxy.
+- [x] Send window with a single Go-Back-N retransmit timer. Per-frame deadlines were replaced in the spec, see SPEC.md 5.3.
+- [x] Cumulative ACK carrying credits. NAK when a frame with a known sequence fails its CRC16.
+- [x] Duplicate detection on the receiver.
+- [x] Credit accounting: credits released when the application consumes a frame, with zero-window probes.
+- [x] HELLO handshake that resets sequences and advertises initial credits, with session IDs so a late HELLO cannot reset a live link.
+- [x] `max_retries` exhaustion raises `FL_EV_LINK_DOWN` with the number of unacknowledged frames.
+- [x] Unit tests for wraparound: 5,000 frames through a window of 127.
+- [x] Unit tests over a simulated faulty wire: drops, corruption, duplicates from lost ACKs, cuts and peer restarts. Byte streams cannot reorder frames, so reordering is out of scope.
+- [x] Link-layer fuzz harness where the fuzzer plays the peer.
+- [x] Python package in `host/src/framelink`, mirroring the C state machine and tested against the shared JSON vectors.
+- [x] Python CLI: `send`, `recv`, `monitor`, `bench`, `noisy`.
+- [x] Interop test in CI: the C peer in `examples/tcp_peer` talks to the Python host over TCP.
+- [x] Host recovery test at 1%, 5% and 10% corrupted bytes, run in CI by `bench/host_recovery.py`.
 
 **Exit criteria:** Python↔C interop green in CI, recovery numbers captured on host.
 

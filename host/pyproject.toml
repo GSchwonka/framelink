@@ -25,6 +25,9 @@ dependencies = []
 serial = ["pyserial>=3.5"]
 test = ["pytest>=7"]
 
+[project.scripts]
+framelink = "framelink.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/GSchwonka/framelink"
 Specification = "https://github.com/GSchwonka/framelink/blob/main/docs/SPEC.md"
