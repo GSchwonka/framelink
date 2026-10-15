@@ -127,18 +127,29 @@ The API is still being finalised. The authoritative version will be in `framelin
 
 ## Building and testing
 
+Requires CMake 3.16 or newer and any C99 compiler. Python 3 is only needed to regenerate test vectors.
+
 ```sh
 cmake -B build -DFL_SANITIZE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Fuzzing (Linux or WSL2, clang):
+| CMake option | Default | Effect |
+|--------------|---------|--------|
+| `FL_CRC_TABLE` | `OFF` | 512-byte CRC16 lookup table instead of the bitwise version |
+| `FL_MAX_PAYLOAD` | `255` | Smaller limit shrinks every buffer |
+| `FL_SANITIZE` | `OFF` | AddressSanitizer and UBSan, GCC and Clang only |
+| `FL_BUILD_TESTS` | `ON` at top level | Unit tests and corpus replay |
+| `FL_FUZZ` | `OFF` | libFuzzer harnesses, clang only |
+
+Fuzzing needs clang on Linux, macOS or WSL2. See [fuzz/README.md](fuzz/README.md) for details.
 
 ```sh
-cmake -B build-fuzz -DCMAKE_C_COMPILER=clang -DFL_FUZZ=ON
+CC=clang cmake -B build-fuzz -DFL_FUZZ=ON -DFL_BUILD_TESTS=OFF
 cmake --build build-fuzz
-./build-fuzz/fuzz_decoder fuzz/corpus -max_total_time=600
+mkdir -p /tmp/fl-corpus && cp fuzz/corpus/decoder/* /tmp/fl-corpus/
+./build-fuzz/fuzz/fuzz_decoder /tmp/fl-corpus -dict=fuzz/framelink.dict -max_total_time=600
 ```
 
 ## Measurements
